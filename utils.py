@@ -5,6 +5,7 @@
 ############################################################
 # ライブラリの読み込み
 ############################################################
+import streamlit as 
 import streamlit as st
 from langchain.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain.schema import HumanMessage
