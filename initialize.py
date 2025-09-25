@@ -112,30 +112,60 @@ def initialize_retriever():
     # RAGの参照先となるデータソースの読み込み
     docs_all = load_data_sources()
 
+    # デバッグ: docs_allに議事録ルール.txtが含まれているか出力
+    for doc in docs_all:
+        if "議事録ルール.txt" in doc.metadata.get("source", ""):
+            print("[DEBUG] docs_all 議事録ルール.txt content:", doc.page_content)
+            try:
+                logger = logging.getLogger(ct.LOGGER_NAME)
+                logger.info(f"[DEBUG] docs_all 議事録ルール.txt content: {doc.page_content}")
+            except Exception:
+                pass
+
     # OSがWindowsの場合、Unicode正規化と、cp932（Windows用の文字コード）で表現できない文字を除去
     for doc in docs_all:
         doc.page_content = adjust_string(doc.page_content)
         for key in doc.metadata:
             doc.metadata[key] = adjust_string(doc.metadata[key])
-    
+
     # 埋め込みモデルの用意
     embeddings = OpenAIEmbeddings()
-    
-    # チャンク分割用のオブジェクトを作成
-    text_splitter = CharacterTextSplitter(
-        chunk_size=500,
-        chunk_overlap=50,
-        separator="\n"
-    )
 
-    # チャンク分割を実施
-    splitted_docs = text_splitter.split_documents(docs_all)
+
+    splitted_docs = []
+    for doc in docs_all:
+        # 社員名簿.csvだけはチャンクサイズを大きくする
+        if "社員名簿.csv" in doc.metadata.get("source", ""):
+            splitter = CharacterTextSplitter(
+                chunk_size=20000,
+                chunk_overlap=0,
+                separator="\n"
+            )
+        else:
+            splitter = CharacterTextSplitter(
+                chunk_size=ct.CHUNK_SIZE,
+                chunk_overlap=ct.CHUNK_OVERLAP,
+                separator="\n"
+            )
+        splitted_docs.extend(splitter.split_documents([doc]))
+
+    # デバッグ: splitted_docsに議事録ルール.txtが含まれているか出力
+    """
+    for doc in splitted_docs:
+        if "議事録ルール.txt" in doc.metadata.get("source", ""):
+            print("[DEBUG] splitted_docs 議事録ルール.txt content:", doc.page_content)
+            try:
+                logger = logging.getLogger(ct.LOGGER_NAME)
+                logger.info(f"[DEBUG] splitted_docs 議事録ルール.txt content: {doc.page_content}")
+            except Exception:
+                pass
+    """
 
     # ベクターストアの作成
     db = Chroma.from_documents(splitted_docs, embedding=embeddings)
 
     # ベクターストアを検索するRetrieverの作成
-    st.session_state.retriever = db.as_retriever(search_kwargs={"k": 3})
+    st.session_state.retriever = db.as_retriever(search_kwargs={"k": ct.RETRIEVER_TOP_K})
 
 
 def initialize_session_state():
@@ -214,10 +244,25 @@ def file_load(path, docs_all):
 
     # 想定していたファイル形式の場合のみ読み込む
     if file_extension in ct.SUPPORTED_EXTENSIONS:
-        # ファイルの拡張子に合ったdata loaderを使ってデータ読み込み
-        loader = ct.SUPPORTED_EXTENSIONS[file_extension](path)
-        docs = loader.load()
-        docs_all.extend(docs)
+            # 社員名簿.csvだけは全行を1ドキュメントにまとめて登録（グルーピングなし）
+            if file_name == "社員名簿.csv":
+                import csv
+                with open(path, encoding="utf-8") as f:
+                    reader = csv.DictReader(f)
+                    rows = list(reader)
+                # 各従業員を1行テキストに整形し、連結
+                lines = [
+                    f"社員ID: {row['社員ID']}, 氏名: {row['氏名（フルネーム）']}, 性別: {row['性別']}, 生年月日: {row['生年月日']}, 年齢: {row['年齢']}, メールアドレス: {row['メールアドレス']}, 従業員区分: {row['従業員区分']}, 入社日: {row['入社日']}, 部署: {row['部署']}, 役職: {row['役職']}, スキルセット: {row['スキルセット']}, 保有資格: {row['保有資格']}, 大学名: {row['大学名']}, 学部・学科: {row['学部・学科']}, 卒業年月日: {row['卒業年月日']}" for row in rows
+                ]
+                all_text = "\n".join(lines)
+                from langchain_core.documents import Document
+                doc = Document(page_content=all_text, metadata={"source": path})
+                docs_all.append(doc)
+            else:
+                # ファイルの拡張子に合ったdata loaderを使ってデータ読み込み
+                loader = ct.SUPPORTED_EXTENSIONS[file_extension](path)
+                docs = loader.load()
+                docs_all.extend(docs)
 
 
 def adjust_string(s):
