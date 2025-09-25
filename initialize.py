@@ -11,7 +11,6 @@ from logging.handlers import TimedRotatingFileHandler
 from uuid import uuid4
 import sys
 import unicodedata
-from dotenv import load_dotenv
 import streamlit as st
 from docx import Document
 from langchain_community.document_loaders import WebBaseLoader
@@ -24,8 +23,8 @@ import constants as ct
 ############################################################
 # 設定関連
 ############################################################
-# 「.env」ファイルで定義した環境変数の読み込み
-load_dotenv()
+
+
 
 
 ############################################################
@@ -42,8 +41,10 @@ def initialize():
     initialize_session_id()
     # ログ出力の設定
     initialize_logger()
+    # OpenAI APIキーをst.secretsから取得
+    api_key = st.secrets["OPENAI_API_KEY"]
     # RAGのRetrieverを作成
-    initialize_retriever()
+    initialize_retriever(api_key)
 
 
 def initialize_logger():
@@ -129,7 +130,15 @@ def initialize_retriever():
             doc.metadata[key] = adjust_string(doc.metadata[key])
 
     # 埋め込みモデルの用意
-    embeddings = OpenAIEmbeddings()
+    # OpenAIEmbeddingsにAPIキーを渡す
+    import inspect
+    if "api_key" in inspect.signature(OpenAIEmbeddings.__init__).parameters:
+        embeddings = OpenAIEmbeddings(api_key=st.secrets["OPENAI_API_KEY"])
+    else:
+        # 古いバージョンの場合は環境変数にセット
+        import os
+        os.environ["OPENAI_API_KEY"] = st.secrets["OPENAI_API_KEY"]
+        embeddings = OpenAIEmbeddings()
 
 
     splitted_docs = []
